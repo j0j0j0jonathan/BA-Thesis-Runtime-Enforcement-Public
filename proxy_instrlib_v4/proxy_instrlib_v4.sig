@@ -1,0 +1,10 @@
+Ask(id:int)
+SafeResponse(id:int)
+UnsafeResponse(id:int)
+ToolCallProposed(id:int)
+SafeToolCall(id:int)
+DangerousToolCall(id:int)
+Disclaimer(id:int)+
+Block(id:int)+
+BlockToolCall(id:int)+
+WarnToolCall(id:int)+

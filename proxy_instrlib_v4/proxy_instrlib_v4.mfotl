@@ -1,0 +1,78 @@
+(* =========================================================================
+   proxy_instrlib_v4.mfotl — Combined content + tool call enforcement policy
+   =========================================================================
+
+   Four policies enforced simultaneously.
+
+   POLICY 1 — Content safety (unchanged from v2)
+   -----------------------------------------------
+   1a. First unsafe response (no ONCE[1,2] history)  → Disclaimer
+   1b. Repeated unsafe response (ONCE[1,2] history)  → Block
+
+   POLICY 2 — Rate limiting (unchanged from v2)
+   ---------------------------------------------
+   3+ distinct unsafe responses in last 5 timesteps  → Block
+
+   POLICY 3 — Dangerous tool call (new in v4)
+   -------------------------------------------
+   Any response proposing a dangerous shell command   → BlockToolCall
+   This is the core agent enforcement policy: the enforcer blocks the
+   response before the user sees it (and potentially acts on the command).
+
+   POLICY 4 — Tool call escalation (new in v4)
+   -------------------------------------------
+   Safe tool call proposed AFTER a recent dangerous one → WarnToolCall
+   Models the scenario where an agent is probing with dangerous commands
+   and then switches to safe-looking ones. The recent dangerous history
+   justifies elevated scrutiny even for nominally safe commands.
+
+   IMPORTANT: BlockToolCall and Block are independent causation actions.
+   If BOTH fire at the same timestep (e.g. unsafe content + dangerous
+   tool call), the Python handler priority dict determines the winner
+   (Block is registered first and wins — see proxy_instrlib_v4.py).
+   ========================================================================= *)
+
+(* Policy 1a: First unsafe content response → Disclaimer *)
+(ALWAYS (
+  FORALL id.
+    (Ask(id) AND NOT SafeResponse(id)
+              AND NOT ONCE[1,2] (EXISTS id2. UnsafeResponse(id2)))
+    IMPLIES Disclaimer(id)
+))
+AND
+(* Policy 1b: Repeated unsafe content (recent history) → Block *)
+(ALWAYS (
+  FORALL id.
+    (Ask(id) AND NOT SafeResponse(id)
+              AND ONCE[1,2] (EXISTS id2. UnsafeResponse(id2)))
+    IMPLIES Block(id)
+))
+AND
+(* Policy 2: Rate limit — 3+ distinct unsafe in last 5 → Block *)
+(ALWAYS (
+  FORALL id.
+    (Ask(id) AND NOT SafeResponse(id) AND
+      (EXISTS a. EXISTS b. EXISTS c.
+        (ONCE[1,5] (UnsafeResponse(a)) AND
+         ONCE[1,5] (UnsafeResponse(b)) AND
+         ONCE[1,5] (UnsafeResponse(c)) AND
+         a <> b AND b <> c AND a <> c)))
+    IMPLIES Block(id)
+))
+AND
+(* Policy 3: Dangerous tool call proposed → BlockToolCall *)
+(* Core agent enforcement: block before the user can act on the command *)
+(ALWAYS (
+  FORALL id.
+    (Ask(id) AND ToolCallProposed(id) AND DangerousToolCall(id))
+    IMPLIES BlockToolCall(id)
+))
+AND
+(* Policy 4: Safe tool call after recent dangerous → WarnToolCall *)
+(* Elevated scrutiny: probing pattern detected, warn even on safe commands *)
+(ALWAYS (
+  FORALL id.
+    (Ask(id) AND ToolCallProposed(id) AND NOT DangerousToolCall(id)
+              AND ONCE[1,3] (EXISTS id2. DangerousToolCall(id2)))
+    IMPLIES WarnToolCall(id)
+))
