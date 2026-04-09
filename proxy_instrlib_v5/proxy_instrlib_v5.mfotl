@@ -1,0 +1,71 @@
+(* =
+   proxy_instrlib_v5.mfotl Agent action enforcement for NanoClaw
+
+   Policy 1: Block dangerous bash commands immediately.
+     If the agent proposes a Bash tool_use and the command matches
+     danger patterns, block the entire tool call.
+
+   Policy 2: Warn on bash after recent dangerous attempt.
+     If the agent proposes a Bash execution that looks safe, but
+     a dangerous command was attempted in the last 3 timesteps,
+     prepend a warning. Elevated scrutiny window.
+
+   Policy 3: Rate-limit file writes.
+     If 3+ DISTINCT FILES have been written across the current and last 5
+     turns, block further writes. "Distinct" is determined by file-path IDs
+     assigned in Python (mappings.py file registry) — not by timestep.
+     Writes to the same file in different turns count as one distinct file.
+     Batching all writes into one turn does NOT bypass this policy.
+
+   Policy 4: Block web access after dangerous command.
+     If a dangerous command was seen in the last 3 timesteps and
+     the agent now attempts web access, block it. Prevents
+     exfiltration after a dangerous action.
+    *)
+
+(* Policy 1 — Block dangerous bash commands *)
+(ALWAYS (
+  FORALL id.
+    (AgentTurn(id) AND BashExec(id) AND DangerousCommand(id))
+    IMPLIES BlockAction(id)
+))
+
+AND
+
+(* Policy 2 — Warn on safe bash after recent dangerous attempt *)
+(ALWAYS (
+  FORALL id.
+    (AgentTurn(id) AND BashExec(id) AND SafeCommand(id)
+     AND (ONCE[1,3] (EXISTS id2. DangerousCommand(id2))))
+    IMPLIES WarnAction(id)
+))
+
+AND
+
+(* Policy 3 — Rate-limit file writes: 3+ distinct files written → Block
+   turn = agent turn counter (from AgentTurn)
+   fid  = any file-path ID visible at or before the current turn (ONCE[0,5])
+   a, b = two further distinct file-path IDs in the same window
+   All three IDs must be distinct → 3 different files total.
+   ONCE[0,5] (vs ONCE[1,5]) includes the CURRENT timestep, so batching
+   all writes into one turn does NOT bypass this policy. *)
+(ALWAYS (
+  FORALL turn.
+    (AgentTurn(turn) AND
+      (EXISTS fid. EXISTS a. EXISTS b.
+        (ONCE[0,5] (FileWrite(fid)) AND
+         ONCE[0,5] (FileWrite(a)) AND
+         ONCE[0,5] (FileWrite(b)) AND
+         fid <> a AND fid <> b AND a <> b)))
+    IMPLIES BlockAction(turn)
+))
+
+AND
+
+(* Policy 4 — Block web access after recent dangerous command *)
+(ALWAYS (
+  FORALL id.
+    (AgentTurn(id) AND WebAccess(id)
+     AND (ONCE[1,3] (EXISTS id2. DangerousCommand(id2))))
+    IMPLIES BlockAction(id)
+))

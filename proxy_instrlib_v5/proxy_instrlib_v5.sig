@@ -1,0 +1,11 @@
+AgentTurn(id:int)
+BashExec(id:int)
+FileWrite(id:int)
+FileRead(id:int)
+WebAccess(id:int)
+SafeCommand(id:int)
+DangerousCommand(id:int)
+TextOnly(id:int)
+Allowed(id:int)+
+BlockAction(id:int)+
+WarnAction(id:int)+
